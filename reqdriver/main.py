@@ -18,12 +18,11 @@ class RequestsDriver:
         Returns:
         str: Path to the generated proxy extension file.
         """
-        return RequestsDriver(session)._setup_proxy_extension()
+        return RequestsDriver(session, driver=False)._setup_proxy_extension()
 
     def __init__(
         self, 
         session: requests.Session, 
-        driver_path: Optional[str] = None, 
         driver: Optional[Chrome] = None,
         do_not_set_proxy: bool = False,
         custom_options: Optional[ChromeOptions] = None
@@ -33,7 +32,6 @@ class RequestsDriver:
 
         Args:
         session (requests.Session): The session to transfer to the WebDriver.
-        driver_path (Optional[str]): The path to the ChromeDriver executable.
         driver (Optional[Chrome]): An existing Chrome WebDriver instance.
         do_not_set_proxy (bool): Whether to ignore the session's proxy setting.
         custom_options (Optional[ChromeOptions]): Custom options for the WebDriver.
@@ -41,7 +39,6 @@ class RequestsDriver:
         self.session = session
         self.proxy_extension = None
         self.session_proxy = session.proxies.get('http') if not do_not_set_proxy else None
-        self.driver_path = driver_path or os.environ.get('CHROMEDRIVER_PATH')
         self.custom_options = custom_options or ChromeOptions()
         self.driver = driver if driver is not None else self._init_driver()
     
@@ -63,7 +60,7 @@ class RequestsDriver:
             self.proxy_extension = self._setup_proxy_extension()
             self.custom_options.add_extension(self.proxy_extension)
 
-        return Chrome(executable_path=self.driver_path, options=self.custom_options)
+        return Chrome(options=self.custom_options)
 
     def _setup_proxy_extension(self) -> str:
         """
@@ -80,15 +77,23 @@ class RequestsDriver:
             zp.writestr("background.js", background_js)
 
         return pluginfile
-
+    
     def _create_proxy_extension_files(self) -> tuple[str, str]:
         """
-        Creates the proxy extension files for Chrome.
+        Creates the proxy extension files for Chrome, handling authenticated proxies if needed.
 
         Returns:
         tuple[str, str]: The manifest.json and background.js content for the extension.
         """
-        proxy_host, proxy_port = self.session_proxy.split('//')[1].split(':')
+        proxy_parts = self.session_proxy.split('//')[1]
+        if '@' in proxy_parts:
+            proxy_user, proxy_rest = proxy_parts.split('@')
+            proxy_host, proxy_port = proxy_rest.split(':')
+            proxy_user, proxy_pass = proxy_user.split(':')
+        else:
+            proxy_host, proxy_port = proxy_parts.split(':')
+            proxy_user, proxy_pass = None, None
+
         manifest_json = """
         {
             "version": "1.0.0",
@@ -121,8 +126,27 @@ class RequestsDriver:
                 }}
             }};
         chrome.proxy.settings.set({{value: config, scope: "regular"}}, function() {{}});
+
         """
+        if proxy_user and proxy_pass:
+            background_js += f"""
+            function callbackFn(details) {{
+                return {{
+                    authCredentials: {{
+                        username: "{proxy_user}",
+                        password: "{proxy_pass}"
+                    }}
+                }};
+            }}
+            chrome.webRequest.onAuthRequired.addListener(
+                callbackFn,
+                {{urls: ["<all_urls>"]}},
+                ['blocking']
+            );
+            """
+        
         return manifest_json, background_js
+
 
     def set_cookies(self, url: str) -> None:
         """

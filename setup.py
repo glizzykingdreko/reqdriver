@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='reqdriver',
-    version='0.1.1',
+    version='0.1.2',
     author='glizzykingdreko',  # Replace with your name
     author_email='glizzykingdreko@protonmail.com',  # Replace with your email
     description='Effortlessly transfer sessions from Python requests to Selenium WebDriver.',
